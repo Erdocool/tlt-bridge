@@ -22,7 +22,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-$script:Version = '1.0.0'
+$script:Version = '1.1.0'
 
 # ---------------------------------------------------------------- basics
 
@@ -774,6 +774,51 @@ function Receive-Slot {
     }
 }
 
+# ---------------------------------------------------------------- heartbeat / single instance (watchdog.ps1 reads these)
+
+$script:HeartbeatPath = Join-Path $script:HomeDir 'heartbeat.txt'
+$script:PidPath = Join-Path $script:HomeDir 'bridge.pid'
+
+function Write-Heartbeat([int64]$Loop) {
+    # "<unix seconds> <pid> <loop>" - rewritten every poll loop; the watchdog restarts the bridge when it gets old
+    try { [System.IO.File]::WriteAllText($script:HeartbeatPath, ('' + (Get-UnixNow) + ' ' + $PID + ' ' + $Loop)) } catch {}
+}
+
+function Test-OtherBridge {
+    # another live bridge with a fresh heartbeat -> do not start a second one (Telegram would answer 409)
+    try {
+        if (-not (Test-Path -LiteralPath $script:PidPath) -or -not (Test-Path -LiteralPath $script:HeartbeatPath)) { return $false }
+        $other = [int]([System.IO.File]::ReadAllText($script:PidPath).Trim())
+        if ($other -eq $PID) { return $false }
+        $p = Get-Process -Id $other -ErrorAction SilentlyContinue
+        if (-not $p) { return $false }
+        $hb = ([System.IO.File]::ReadAllText($script:HeartbeatPath).Trim() -split ' ')
+        return (((Get-UnixNow) - [int64]$hb[0]) -lt 120 -and [int]$hb[1] -eq $other)
+    } catch { return $false }
+}
+
+function Set-StayAwake {
+    # keep Windows from going to sleep while the bridge runs (the screen may still turn off); no admin, no setting changed.
+    # Ends by itself when the bridge closes. TLT_ALLOW_SLEEP=1 turns it off.
+    if ($env:TLT_ALLOW_SLEEP -eq '1' -or $env:OS -ne 'Windows_NT') { return }
+    try {
+        if (-not ('TLT.Power' -as [type])) { Add-Type -Namespace TLT -Name Power -MemberDefinition '[DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint esFlags);' }
+        [void][TLT.Power]::SetThreadExecutionState([uint32]2147483649)   # ES_CONTINUOUS | ES_SYSTEM_REQUIRED
+        Write-Log 'Uyku engellendi: kopru acikken bilgisayar uyumaz (ekran kapanabilir).' 'DarkGray'
+    } catch { Write-Log ('Uyku engellenemedi: ' + $_.Exception.Message) 'Yellow' }
+}
+
+function Send-StartNotice {
+    # a short line in the group whenever the bridge (re)starts, so a restart is visible from the chat
+    $why = 'elle'
+    if (-not [string]::IsNullOrWhiteSpace($env:TLT_START_REASON)) { $why = $env:TLT_START_REASON }
+    $chat = $script:FileChatId
+    if (-not $chat -and $script:DefaultChatIds.Count) { $chat = $script:DefaultChatIds[0] }
+    if (-not $chat) { return }
+    $text = 'TLT koprusu basladi (v' + $script:Version + ') | ' + $env:COMPUTERNAME + ' | ' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + ' | sebep: ' + $why
+    try { [void](Send-TgText ([int64]$chat) $text $null) } catch { Write-Log ('Baslangic mesaji gonderilemedi: ' + $_.Exception.Message) 'Yellow' }
+}
+
 # ---------------------------------------------------------------- main
 
 function Show-Banner {
@@ -796,6 +841,14 @@ function Show-Banner {
 
 function Start-Bridge {
     Initialize-Console
+    if (-not (Test-Path -LiteralPath $script:HomeDir)) { New-Item -ItemType Directory -Path $script:HomeDir -Force | Out-Null }
+    if ((Test-OtherBridge) -and $env:TLT_FORCE -ne '1') {
+        Write-Host 'Kopru zaten calisiyor (baska bir pencerede ya da arka planda). Bu pencere kapanabilir.' -ForegroundColor Yellow
+        return
+    }
+    [System.IO.File]::WriteAllText($script:PidPath, [string]$PID)
+    Write-Heartbeat 0
+    Set-StayAwake
     Initialize-Net
     Resolve-Config
     try {
@@ -825,6 +878,7 @@ function Start-Bridge {
         } catch {}
     }
     Show-Banner
+    Send-StartNotice
 
     $poll = 2
     if ($env:TLT_POLL) { $poll = [int]$env:TLT_POLL }
@@ -833,6 +887,7 @@ function Start-Bridge {
     $loops = 0
     while ($true) {
         $loops++
+        Write-Heartbeat $loops
         if ($maxLoops -gt 0 -and $loops -gt $maxLoops) { break }
         $okLoop = $true
         try { Receive-Updates $poll } catch {

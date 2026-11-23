@@ -33,6 +33,13 @@
     } finally { $fs.Dispose() }
     Write-Host ('  Indirildi: ' + $target)
 
+    # 1b) bekci (watchdog): kopru kapanir/takilirsa 5 dk icinde yeniden baslatir (yonetici gerekmez)
+    try {
+        $wd = $wc.DownloadData($repo + '/watchdog.ps1?t=' + [DateTime]::UtcNow.Ticks)
+        [System.IO.File]::WriteAllBytes((Join-Path $dir 'watchdog.ps1'), $wd)
+        Write-Host ('  Indirildi: ' + (Join-Path $dir 'watchdog.ps1'))
+    } catch { Write-Host '  Uyari: watchdog.ps1 indirilemedi.' -ForegroundColor Yellow }
+
     # 2) Token'i al ve kaydet (yoksa sor)
     $cfgPath = Join-Path $dir 'config.json'
     $cfg = $null
@@ -75,6 +82,10 @@
             Write-Host '  Masaustune "TLT Kopru" kisayolu eklendi (sonraki seferler icin cift tiklayin).'
         }
     } catch {}
+
+    if ($env:OS -eq 'Windows_NT' -and (Test-Path -LiteralPath (Join-Path $dir 'watchdog.ps1'))) {
+        try { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $dir 'watchdog.ps1') -Install | Out-Null; Write-Host '  Bekci gorevi kuruldu: "TLT Kopru Bekcisi" (her 5 dk kontrol).' } catch { Write-Host '  Uyari: bekci gorevi kurulamadi.' -ForegroundColor Yellow }
+    }
 
     if ($NoStart) { Write-Host 'Kurulum bitti (baslatilmadi).' -ForegroundColor Green; return }
 

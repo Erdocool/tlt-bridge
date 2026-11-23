@@ -44,6 +44,16 @@ Pencereyi açık tut. Sonraki seferlerde masaüstündeki **TLT Kopru** kısayolu
 
 Telegram'dan güncelleme okuyan (`getUpdates`) tek taraf bu köprü. Grok'un bilgisayarı `getUpdates` çağırmaz, böylece iki taraf birbirinin mesajını çalmaz. Grok komutlarını botun dile özel açıklama alanına (`ia`) yazar, köprü sonuçları başka bir alana (`eo`) yazar; uzun içerik telegra.ph sayfalarında durur. Hepsi bot token'ından türetilen anahtarla şifrelenir (AES-256 + HMAC). Dosyalar Telegram dosya kimlikleriyle taşınır.
 
+## Kendi kendini onarma (bekçi)
+
+- Köprü her döngüde `%USERPROFILE%\.tlt-bridge\heartbeat.txt` dosyasına zaman yazar, PID'ini `bridge.pid`'e koyar.
+- **TLT Kopru Bekcisi** zamanlanmış görevi (sadece bu kullanıcı, yönetici/UAC gerekmez) her 5 dakikada bir ve oturum açılışında `watchdog.ps1`'i penceresiz çalıştırır.
+- Köprü kapalıysa ya da heartbeat 5 dakikadan eskiyse eski köprü pencerelerini kapatır ve köprüyü küçültülmüş pencerede yeniden başlatır.
+- Her kontrol `C:\TLT\bridge_watchdog.log` dosyasına yazılır. Köprü her (yeniden) başladığında grupta kısa bir mesaj atar.
+- Köprü açıkken Windows uyku moduna geçmez (ekran yine kapanabilir); hiçbir ayar değiştirilmez, köprü kapanınca biter. İstemezsen `TLT_ALLOW_SLEEP=1`.
+- İkinci bir köprü açılmaya çalışılırsa (canlı biri varken) kendini kapatır, böylece 409 çakışması olmaz.
+- Kurulum elle: `powershell -NoProfile -ExecutionPolicy Bypass -File "%USERPROFILE%\.tlt-bridge\watchdog.ps1" -Install` (kaldırmak için `-Uninstall`, zorla yeniden başlatmak için `-Force`).
+
 ## Notlar
 
 - Aynı botla iki köprüyü aynı anda açma (409 hatası verir).
