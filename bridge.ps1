@@ -816,7 +816,9 @@ function Send-StartNotice {
     if (-not $chat -and $script:DefaultChatIds.Count) { $chat = $script:DefaultChatIds[0] }
     if (-not $chat) { return }
     $text = 'TLT koprusu basladi (v' + $script:Version + ') | ' + $env:COMPUTERNAME + ' | ' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + ' | sebep: ' + $why
-    try { [void](Send-TgText ([int64]$chat) $text $null) } catch { Write-Log ('Baslangic mesaji gonderilemedi: ' + $_.Exception.Message) 'Yellow' }
+    $note = 'grup mesaji gonderildi'
+    try { [void](Send-TgText ([int64]$chat) $text $null) } catch { $note = 'grup mesaji GONDERILEMEDI: ' + (Hide-Secret $_.Exception.Message); Write-Log ('Baslangic mesaji gonderilemedi: ' + $_.Exception.Message) 'Yellow' }
+    try { if (Test-Path -LiteralPath 'C:\TLT') { Add-Content -LiteralPath 'C:\TLT\bridge_watchdog.log' -Value ((Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + '  kopru v' + $script:Version + ' basladi (pid ' + $PID + ', sebep: ' + $why + '), ' + $note) -Encoding UTF8 } } catch {}
 }
 
 # ---------------------------------------------------------------- main
